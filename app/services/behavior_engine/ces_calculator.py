@@ -10,10 +10,18 @@ class CESCalculator:
     # ---------------------------------------------------------
     # 1. HEURISTIC THRESHOLDS (TUNED FOR PHASE 2)
     # ---------------------------------------------------------
-    MIN_KPM = 5.0; MAX_KPM = 40.0
-    MIN_AD = 0.05; MAX_AD = 0.5
-    MIN_IR = 0.0; MAX_IR = 0.60
-    MIN_FVC = 0; MAX_FVC = 10
+    # KPM: Keystrokes Per Minute
+    MIN_KPM = 2.0 
+    MAX_KPM = 25.0
+    # AD: Attempt Density (Runs per Minute)
+    MIN_AD = 0.02
+    MAX_AD = 0.25
+    # Idle Ratio (IR)
+    MIN_IR = 0.0
+    MAX_IR = 0.60
+    # FVC: Focus Violation Count
+    MIN_FVC = 0
+    MAX_FVC = 10
     
     # ---------------------------------------------------------
     # 2. WEIGHTS (Thesis Section 1.3.1)
