@@ -1,28 +1,5 @@
-from dataclasses import dataclass
+from app.services.behavior_engine.metrics import SessionMetrics
 from app.services.behavior_engine.data_fusion import FusionInsights
-
-@dataclass
-class SessionMetrics:
-    """
-    DTO that holds the RAW telemetry data.
-    Updated to include the specific fields needed for the 3 Decision Trees (Figs 5, 6, 7).
-    """
-    # Base Metrics
-    duration_minutes: float
-    total_keystrokes: int
-    total_run_attempts: int
-    total_idle_minutes: float
-    focus_violation_count: int
-    net_code_change: int
-    
-    # --- NEW FIELDS FOR DECISION TREES ---
-    # These are required by the DataFusionEngine logic we just wrote
-    last_edit_size_chars: int        # Needed for Provenance (Figure 5)
-    last_run_interval_seconds: float # Needed for Iteration (Figure 6)
-    is_semantic_change: bool         # Needed for Iteration (Figure 6)
-    current_idle_duration: float     # Needed for Cognitive State (Figure 7)
-    is_window_focused: bool          # Needed for Cognitive State (Figure 7)
-    last_run_was_error: bool         # Needed for Cognitive State (Figure 7)
 
 class CESCalculator:
     """

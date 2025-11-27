@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
-from app.services.behavior_engine.ces_calculator import SessionMetrics
+from app.services.behavior_engine.metrics import SessionMetrics
 
 # --- DEFINING THE ENUMS (The Standardized Flags) ---
 
@@ -9,7 +9,7 @@ class ProvenanceState(str, Enum):
     AUTHENTIC_REFACTORING = "Authentic Refactoring"
     AMBIGUOUS_EDIT = "Ambiguous Large Edit"
     SUSPECTED_PASTE = "Suspected External Paste"
-    SPAMMING = "Spamming/Gaming"
+    SPAMMING = "Spamming"
 
 class IterationState(str, Enum):
     NORMAL = "Normal"
@@ -24,11 +24,12 @@ class CognitiveState(str, Enum):
     PASSIVE_IDLE = "Passive Idle"
     DISENGAGEMENT = "Disengagement"
 
+# --- CORE ALGORITHM ---
+
 @dataclass
 class FusionInsights:
     """
     Carries the Qualitative Pedagogical Insights derived from Data Fusion.
-    Now uses strict ENUMS instead of raw strings.
     """
     provenance_state: ProvenanceState
     iteration_state: IterationState
@@ -66,7 +67,7 @@ class DataFusionEngine:
             else:
                 provenance = ProvenanceState.AMBIGUOUS_EDIT
 
-        # Logic Tree: Spam/Gaming Check
+        # Logic Tree: Spam Check
         efficiency_ratio = metrics.net_code_change / metrics.total_keystrokes if metrics.total_keystrokes > 50 else 1.0
         
         if metrics.total_keystrokes > 200 and efficiency_ratio < 0.05:
