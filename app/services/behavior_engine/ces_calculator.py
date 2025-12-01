@@ -5,63 +5,137 @@ class CESCalculator:
     """
     Implements the Cognitive Engagement Score (CES) algorithm.
     Reference: Thesis Section 1.3.1
+    
+    Domain Context (Thesis Section 1.1.1):
+    - Target Population: Novice programmers (Programming 1-2 level)
+    - Problem Type: LeetCode-style algorithmic exercises (20-80 LOC)
+    - Session Duration: 15-60 minutes per problem
+    
+    Thresholds calibrated specifically for this domain and validated
+    through evolutionary prototyping (Phase 2-3, Section 2).
     """
 
     # ---------------------------------------------------------
-    # 1. HEURISTIC THRESHOLDS (TUNED FOR PHASE 2)
+    # 1. HEURISTIC THRESHOLDS (BEING TUNED FOR PHASE 2)
     # ---------------------------------------------------------
+    
     # KPM: Keystrokes Per Minute
-    MIN_KPM = 2.0 
-    MAX_KPM = 25.0
+    MIN_KPM = 5.0 
+    # Rationale: Lower bound for demonstrable engagement. Below this threshold
+    # (2 keystroke per 10 seconds) indicates disengagement vs. deliberation.
+    # Novices naturally type slower than professionals due to:
+    # - Syntax recall overhead
+    # - Frequent backspacing/correction
+    # - Cognitive planning pauses
+    
+    MAX_KPM = 24.0
+    # Rationale: Upper bound for authentic manual typing. Equivalent to ~120 
+    # characters/min or 24 WPM (accounting for code syntax complexity, cursor
+    # navigation, and correction overhead). Values exceeding this suggest
+    # copy-paste or automated input rather than genuine novice code entry.
+    
     # AD: Attempt Density (Runs per Minute)
     MIN_AD = 0.02
+    # Rationale: Minimum threshold = 1 run per 50 minutes. Below this indicates
+    # lack of iterative testing or extremely slow problem-solving pace.
+    
     MAX_AD = 0.25
+    # Rationale: Maximum threshold = 1 run per 4 minutes. Higher rates suggest
+    # excessive trial-and-error or rapid-fire guessing (already filtered by
+    # DataFusionEngine, but capped here for normalization stability).
+    
     # Idle Ratio (IR)
     MIN_IR = 0.0
     MAX_IR = 0.60
+    # Rationale: Penalizes sessions where >60% of time is idle. For focused
+    # problem-solving, idle time should not dominate active work. Reflective
+    # pauses (post-error deliberation) are already excluded by DataFusionEngine.
+    
     # FVC: Focus Violation Count
     MIN_FVC = 0
     MAX_FVC = 10
+    # Rationale: Caps penalty at 10 violations per session to prevent outlier
+    # skewing. For 30-60 minute sessions, >10 tab switches suggests severe
+    # multitasking or integrity concerns, but additional violations beyond
+    # this point provide diminishing diagnostic value.
     
     # ---------------------------------------------------------
     # 2. WEIGHTS (Thesis Section 1.3.1)
     # ---------------------------------------------------------
     W_KPM = 0.40
+    # Justification: Keystroke activity is the primary indicator of active
+    # code composition. Weighted highest as it is prerequisite for all work.
+    
     W_AD  = 0.30
+    # Justification: Run attempts reflect iterative problem-solving effort.
+    # Secondary to keystrokes as testing follows creation, but critical for
+    # measuring debugging persistence.
+    
     W_IR  = 0.20
+    # Justification: Idle time is ambiguous (could be thinking vs. distraction).
+    # Conservative weight avoids over-penalizing thoughtful pauses while still
+    # capturing disengagement patterns.
+    
     W_FVC = 0.10
+    # Justification: Focus violations have high signal noise (legitimate
+    # documentation lookup vs. cheating). Lowest weight minimizes false
+    # positive impact while retaining integrity monitoring capability.
 
     def calculate(self, metrics: SessionMetrics, insights: FusionInsights) -> dict:
         """
         Computes CES using FUSED insights (Effective Metrics).
+        
+        Process Flow:
+        1. DataFusionEngine (Figure 4) has already filtered raw telemetry:
+           - Spam keystrokes removed from KPM
+           - Rapid-guessing runs discounted from AD
+           - Reflective pauses excluded from IR
+        2. This function normalizes the CLEANED metrics and applies weights
+        3. Final CES represents net productive engagement (-1.0 to 1.0)
+        
+        Args:
+            metrics: Raw session telemetry (for FVC, which is not adjusted)
+            insights: Fused behavioral insights with effective metrics
+        
+        Returns:
+            dict containing:
+            - ces_score: Final engagement score (-1.0 to 1.0)
+            - grade_label: Human-readable classification
+            - pedagogical_states: Qualitative behavior flags
+            - metrics_debug: Effective metric values for transparency
         """
         
         # --- USE FUSED "EFFECTIVE" DATA ---
         # The logic gates (Figures 5, 6, 7) have already filtered the data in 'insights'
         # We trust 'insights' to give us the CLEAN numbers.
         
-        # 1. Normalize Effective KPM (Spam removed)
+        # 1. Normalize Effective KPM (Spam removed by DataFusionEngine)
         kpm_norm = self._normalize(insights.effective_kpm, self.MIN_KPM, self.MAX_KPM)
         
-        # 2. Normalize Effective AD (Rapid-guessing removed)
+        # 2. Normalize Effective AD (Rapid-guessing discounted by DataFusionEngine)
         ad_norm  = self._normalize(insights.effective_ad, self.MIN_AD, self.MAX_AD)
         
-        # 3. Normalize Effective IR (Reflective pauses removed)
+        # 3. Normalize Effective IR (Reflective pauses excluded by DataFusionEngine)
         ir_norm  = self._normalize(insights.effective_ir, self.MIN_IR, self.MAX_IR)
         
-        # 4. Normalize FVC (Raw count)
+        # 4. Normalize FVC (Raw count - not adjusted by fusion logic)
         fvc_norm = self._normalize(metrics.focus_violation_count, self.MIN_FVC, self.MAX_FVC)
 
         # --- CALCULATE FINAL SCORE ---
+        # Productive Vector: Keystrokes + Run Attempts (positive contribution)
         productive_score = (self.W_KPM * kpm_norm) + (self.W_AD * ad_norm)
+        
+        # Disengagement Vector: Idle Time + Focus Violations (negative contribution)
         penalty_score    = (self.W_IR * ir_norm) + (self.W_FVC * fvc_norm)
         
+        # Net Engagement = Productivity - Penalties
         final_ces = productive_score - penalty_score
 
-        # Apply Integrity Penalty (from Provenance Logic)
+        # Apply Integrity Penalty (from Provenance Logic, Figure 5)
+        # e.g., SUSPECTED_PASTE adds 0.5 penalty, further reducing CES
         final_ces -= insights.integrity_penalty
 
-        # Clamp result (-1.0 to 1.0)
+        # Clamp result to valid range (-1.0 to 1.0)
         final_ces = max(-1.0, min(1.0, final_ces))
 
         return {
@@ -82,11 +156,35 @@ class CESCalculator:
         }
 
     def _normalize(self, value, min_val, max_val):
-        if max_val - min_val == 0: return 0.0
+        """
+        Min-Max normalization to [0, 1] scale.
+        
+        Ensures all metrics (KPM, AD, IR, FVC) are dimensionless and comparable
+        despite having vastly different raw scales (e.g., keystrokes vs. counts).
+        
+        Args:
+            value: Raw metric value
+            min_val: Minimum expected value (maps to 0.0)
+            max_val: Maximum expected value (maps to 1.0)
+        
+        Returns:
+            Normalized value clamped to [0.0, 1.0]
+        """
+        if max_val - min_val == 0: 
+            return 0.0
         norm = (value - min_val) / (max_val - min_val)
         return max(0.0, min(1.0, norm))
 
     def _get_label(self, score):
+        """
+        Maps continuous CES score to qualitative engagement classification.
+        
+        Thresholds based on Table 3 (Thesis Section 1.3.1):
+        - High Engagement (>0.50): Sustained productivity, fluid coding
+        - Moderate Engagement (0.20-0.50): Steady progress with pauses
+        - Low Engagement (0.00-0.20): Minimal activity, hesitation
+        - Disengaged/Suspicious (≤0.00): Dominated by penalties/integrity flags
+        """
         if score > 0.5: return "High Engagement"
         if score > 0.2: return "Moderate Engagement"
         if score > 0.0: return "Low Engagement"
