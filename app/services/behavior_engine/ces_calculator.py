@@ -139,6 +139,16 @@ class CESCalculator:
         final_ces = max(-1.0, min(1.0, final_ces))
 
         return {
+            # Basic metrics (needed by telemetry endpoint)
+            "kpm": round(insights.effective_kpm, 2),
+            "ad": round(insights.effective_ad, 4),
+            "ir": round(insights.effective_ir, 2),
+            
+            # CES Score (needed by telemetry endpoint)
+            "ces": round(final_ces, 4),
+            "classification": self._get_label(final_ces),
+            
+            # Legacy keys for backward compatibility
             "ces_score": round(final_ces, 4),
             "grade_label": self._get_label(final_ces),
             
@@ -150,7 +160,7 @@ class CESCalculator:
             },
             "metrics_debug": {
                 "kpm_effective": round(insights.effective_kpm, 2),
-                "ad_effective": round(insights.effective_ad, 2),
+                "ad_effective": round(insights.effective_ad, 4),
                 "ir_effective": round(insights.effective_ir, 2)
             }
         }

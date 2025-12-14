@@ -10,6 +10,8 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 import logging
 
+from .test_validator import create_test_code
+
 logger = logging.getLogger(__name__)
 
 
@@ -246,9 +248,10 @@ except Exception as e:
     ) -> ExecutionResult:
         """
         Execute code and validate against test cases.
+        Automatically calls the user's function with test inputs.
         
         Args:
-            code: Python code to execute
+            code: Python code to execute (function definition)
             test_cases: List of dicts with 'input' and 'expected_output' keys
             
         Returns:
@@ -262,8 +265,24 @@ except Exception as e:
             test_input = test_case.get('input', '')
             expected = test_case.get('expected_output', '').strip()
             
-            # Execute with this test's input
-            result = await self.execute_code(code, stdin=test_input)
+            # Generate test code that calls the function with inputs
+            test_code, error = create_test_code(code, test_input)
+            
+            if error:
+                # Failed to generate test code (e.g., no function found)
+                test_results.append({
+                    "test_number": i + 1,
+                    "passed": False,
+                    "input": test_input,
+                    "expected_output": expected,
+                    "actual_output": "",
+                    "error": error
+                })
+                all_passed = False
+                continue
+            
+            # Execute the generated test code
+            result = await self.execute_code(test_code, stdin="")
             last_result = result
             
             actual = result.output.strip()
@@ -290,10 +309,13 @@ except Exception as e:
                 last_result.error = ""
             return last_result
         else:
-            # No test cases provided, run once without input
-            final_result = await self.execute_code(code)
-            final_result.test_results = test_results
-            return final_result
+            # No valid test executions, return error result
+            return ExecutionResult(
+                status="error",
+                output="",
+                error="No valid test cases executed",
+                test_results=test_results
+            )
     
     def health_check(self) -> Dict[str, Any]:
         """

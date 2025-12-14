@@ -1,7 +1,7 @@
 # app/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .api.endpoints import execution
+from .api.endpoints import execution, telemetry
 
 app = FastAPI(title="rbAI Backend", version="1.0.0")
 
@@ -14,8 +14,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include execution router
+# Include routers
 app.include_router(execution.router)
+app.include_router(telemetry.router)
 
 @app.get("/")
 async def root():
