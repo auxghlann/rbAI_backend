@@ -31,7 +31,6 @@ class TelemetryRequest(BaseModel):
     Raw telemetry data from frontend (Figure 11: Stage 1 - Telemetry Capture)
     Frontend only collects and buffers raw behavioral signals.
     """
-    session_id: str = Field(..., description="Unique session identifier")
     problem_id: str = Field(..., description="Problem/activity identifier")
     
     # Raw metrics collected by frontend
@@ -49,6 +48,7 @@ class TelemetryRequest(BaseModel):
     current_idle_duration: float = Field(..., description="Current idle period in seconds")
     is_window_focused: bool = Field(..., description="Window currently focused")
     last_run_was_error: bool = Field(..., description="Last execution had errors")
+    recent_burst_size_chars: int = Field(default=0, description="Keystrokes in recent 5-second window")
 
 
 class TelemetryResponse(BaseModel):
@@ -99,7 +99,7 @@ async def analyze_telemetry(request: TelemetryRequest):
     - Returns: Computed CES, states, and effective metrics
     """
     
-    logger.info(f"Processing telemetry for session {request.session_id}, problem {request.problem_id}")
+    logger.info(f"Processing telemetry for problem {request.problem_id}")
     
     try:
         # Step 1: Convert request to SessionMetrics DTO
@@ -115,7 +115,8 @@ async def analyze_telemetry(request: TelemetryRequest):
             is_semantic_change=request.is_semantic_change,
             current_idle_duration=request.current_idle_duration,
             is_window_focused=request.is_window_focused,
-            last_run_was_error=request.last_run_was_error
+            last_run_was_error=request.last_run_was_error,
+            recent_burst_size_chars=request.recent_burst_size_chars
         )
         
         # Step 2: Apply Data Fusion (Figure 11: Stage 2)

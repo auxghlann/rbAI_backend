@@ -22,25 +22,21 @@ class CESCalculator:
     # KPM: Keystrokes Per Minute
     MIN_KPM = 5.0 
     # Rationale: Lower bound for demonstrable engagement. Below this threshold
-    # (2 keystroke per 10 seconds) indicates disengagement vs. deliberation.
-    # Novices naturally type slower than professionals due to:
-    # - Syntax recall overhead
-    # - Frequent backspacing/correction
-    # - Cognitive planning pauses
+    # indicates disengagement vs. deliberation. Values below 5.0 indicate 
+    # insufficient activity for novices in short-form algorithmic tasks.
     
     MAX_KPM = 24.0
-    # Rationale: Upper bound for authentic manual typing. Equivalent to ~120 
-    # characters/min or 24 WPM (accounting for code syntax complexity, cursor
-    # navigation, and correction overhead). Values exceeding this suggest
-    # copy-paste or automated input rather than genuine novice code entry.
+    # Rationale: Upper bound for authentic manual typing (session average).
+    # Values above 24.0 exceed realistic sustained manual entry for novices
+    # in algorithmic problem-solving contexts.
     
     # AD: Attempt Density (Runs per Minute)
-    MIN_AD = 0.02
-    # Rationale: Minimum threshold = 1 run per 50 minutes. Below this indicates
+    MIN_AD = 0.05
+    # Rationale: Minimum threshold = 1 run per 20 minutes. Below this indicates
     # lack of iterative testing or extremely slow problem-solving pace.
     
-    MAX_AD = 0.25
-    # Rationale: Maximum threshold = 1 run per 4 minutes. Higher rates suggest
+    MAX_AD = 0.50
+    # Rationale: Maximum threshold = 1 run per 2 minutes. Higher rates suggest
     # excessive trial-and-error or rapid-fire guessing (already filtered by
     # DataFusionEngine, but capped here for normalization stability).
     

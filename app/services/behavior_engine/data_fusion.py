@@ -60,10 +60,16 @@ class DataFusionEngine:
     # =====================================================================
     
     # Provenance Detection
-    LARGE_INSERTION_THRESHOLD = 100  
-    # Justification: For 40-line solutions (~1,500 chars), 100 chars represents
-    # 6-7% of solution inserted at once. Typical incremental edits by novices
-    # are 15-40 characters (1-2 lines). Exceeding this suggests bulk transfer.
+    LARGE_INSERTION_THRESHOLD = 30  
+    # Justification: For novice solutions (250-500 chars typical), 30 chars represents
+    # 6-12% of solution inserted at once. Typical incremental edits by novices
+    # are 5-15 characters (partial lines). Exceeding this suggests bulk transfer.
+    
+    BURST_TYPING_MIN = 50  # characters
+    BURST_TYPING_MAX = 100  # characters
+    # Justification: Detects rapid continuous input (50-100 chars in short bursts).
+    # Atypical for novice reflective workflows; indicates potential metric inflation
+    # or non-cognitive key-mashing activity.
     
     SPAM_KEYSTROKE_MINIMUM = 200
     SPAM_EFFICIENCY_THRESHOLD = 0.05
@@ -84,10 +90,10 @@ class DataFusionEngine:
     
     # Cognitive State
     REFLECTIVE_PAUSE_MIN = 30  # seconds
-    DISENGAGEMENT_THRESHOLD = 120  # seconds
-    # Justification: Novices require 30-120s post-error to parse messages
-    # and plan corrections. <30s = normal flow. 30-120s + error context = 
-    # reflective pause (valid). >120s or unfocused = disengagement.
+    DISENGAGEMENT_THRESHOLD = 120  # seconds (revised from 30s)
+    # Justification: Idle detection standardized to 120 seconds. Novices require 
+    # 30-120s post-error to parse messages and plan corrections. <30s = normal flow.
+    # 30-120s + error context = reflective pause (valid). >120s = disengagement.
 
     def analyze(self, metrics: SessionMetrics) -> FusionInsights:
         """
@@ -115,40 +121,74 @@ class DataFusionEngine:
         
         # --- 1. PROVENANCE & AUTHENTICITY (Figure 5) ---
         
-        # Default State
+        # IMPORTANT: This analysis is STATELESS and evaluates CURRENT behavior only.
+        # Each telemetry update gets a fresh evaluation. Previous flags don't carry over.
+        # Small legitimate edits after a large insertion will return to INCREMENTAL_EDIT.
+        
+        # Default State (assume legitimate until proven otherwise)
         provenance = ProvenanceState.INCREMENTAL_EDIT
         integrity_penalty = 0.0
         
         raw_kpm = metrics.total_keystrokes / metrics.duration_minutes if metrics.duration_minutes > 0 else 0
         
         # Logic Tree: Large Insertions
-        # Context: For novices solving 40-line problems, 100-char insertions
-        # represent ~3 lines added at once, atypical for incremental construction
+        # Context: For novices solving short problems (250-500 chars), 30-char insertions
+        # represent 6-12% of solution added at once, atypical for incremental construction
+        # NOTE: Small edits (<30 chars) will skip this check and remain INCREMENTAL_EDIT
         if metrics.last_edit_size_chars > self.LARGE_INSERTION_THRESHOLD:
-            if metrics.focus_violation_count > 0 and raw_kpm < 5.0:
-                # Pattern: Large insertion + recent tab-switch + low typing rate
-                # Interpretation: Likely copied from external source
+            # Calculate keystroke density: how many keystrokes were used to create the current code
+            # If last_edit_size is 100 chars but only 10 keystrokes in recent window, likely pasted
+            keystroke_to_insertion_ratio = metrics.recent_burst_size_chars / metrics.last_edit_size_chars if metrics.last_edit_size_chars > 0 else 0
+            
+            # STRICTER: Suspect paste ONLY if multiple strong indicators present
+            # Must have: (1) Very low keystroke ratio (<20%) AND (2) Focus violations AND (3) Large edit (>50 chars)
+            if (keystroke_to_insertion_ratio < 0.2 and 
+                metrics.focus_violation_count > 0 and 
+                metrics.last_edit_size_chars > 50):
+                # Pattern: Very large insertion + tab-switch + extremely low keystroke density
+                # Interpretation: Strong evidence of copy-paste from external source
                 provenance = ProvenanceState.SUSPECTED_PASTE
                 integrity_penalty = 0.5
-            elif raw_kpm > 20.0:
-                # Pattern: Large insertion + high sustained typing
-                # Interpretation: Authentic refactoring/rewrite by skilled novice
+            # Alternative: Large insertion with high keystroke efficiency
+            elif keystroke_to_insertion_ratio > 0.8:
+                # Pattern: Large insertion + high keystroke density (typed it)
+                # Interpretation: Authentic refactoring/rewrite
                 provenance = ProvenanceState.AUTHENTIC_REFACTORING
             else:
                 # Pattern: Large insertion + moderate activity
-                # Interpretation: Uncertain—could be internal block move/paste
+                # Interpretation: Uncertain—could be internal block move/paste or fast typing
                 provenance = ProvenanceState.AMBIGUOUS_EDIT
 
-        # Logic Tree: Spam Check
+        # Logic Tree: Spam Check & Additional Paste Detection
         # Context: Novices typically achieve efficiency ratios of 0.20-0.40
         # due to trial-and-error. Ratios <0.05 suggest random key-mashing.
         efficiency_ratio = metrics.net_code_change / metrics.total_keystrokes if metrics.total_keystrokes > 50 else 1.0
+        
+        # Check for burst typing/spamming
+        is_burst_typing = (self.BURST_TYPING_MIN <= metrics.recent_burst_size_chars <= self.BURST_TYPING_MAX)
+        
+        # Additional paste detection: VERY strict to avoid false positives
+        # Only flag if there's EXTREME evidence: lots of code, very few keystrokes, multiple focus violations
+        if (metrics.net_code_change > 200 and 
+            metrics.total_keystrokes < metrics.net_code_change * 0.3 and 
+            metrics.focus_violation_count > 2 and
+            provenance not in [ProvenanceState.SUSPECTED_PASTE, ProvenanceState.SPAMMING]):
+            # Pattern: Lots of code exists but extremely few keystrokes + multiple tab switches
+            # Interpretation: Code was likely pasted in multiple chunks
+            provenance = ProvenanceState.SUSPECTED_PASTE
+            integrity_penalty = 0.5
         
         if metrics.total_keystrokes > self.SPAM_KEYSTROKE_MINIMUM and efficiency_ratio < self.SPAM_EFFICIENCY_THRESHOLD:
             # Detected: High keystroke volume with negligible code retention
             # Action: Nullify KPM contribution to prevent score inflation
             effective_kpm = 0.0
             provenance = ProvenanceState.SPAMMING
+        elif is_burst_typing and efficiency_ratio < 0.15:
+            # Detected: Burst typing pattern with low efficiency
+            # Action: Flag as potential spamming/gaming behavior
+            effective_kpm = raw_kpm * 0.5  # Apply 50% penalty
+            if provenance == ProvenanceState.INCREMENTAL_EDIT:
+                provenance = ProvenanceState.SPAMMING
         else:
             effective_kpm = raw_kpm
 
@@ -161,15 +201,23 @@ class DataFusionEngine:
         # Logic Tree: Run Intervals
         # Context: Novices need ~10s minimum to process feedback and respond
         if metrics.last_run_interval_seconds < self.RAPID_ITERATION_THRESHOLD:
+            # STRICTER: If last run had error AND rapid re-run, likely guessing regardless of changes
+            # Exception: Only count as MICRO_ITERATION if semantic change AND no error (successful fix)
             if not metrics.is_semantic_change:
                 # Pattern: Quick re-run + no logical change (whitespace only)
                 # Interpretation: Reflexive guessing, not deliberate debugging
                 iteration = IterationState.RAPID_GUESSING
                 # Penalty: Discount 20% of run attempts (partial productivity credit)
                 effective_runs = metrics.total_run_attempts * self.RAPID_GUESSING_PENALTY
+            elif metrics.last_run_was_error:
+                # Pattern: Quick re-run + has changes BUT previous run had error
+                # Interpretation: Likely random trial-and-error without understanding
+                # If truly debugging thoughtfully, would take >10s to read error and fix
+                iteration = IterationState.RAPID_GUESSING
+                effective_runs = metrics.total_run_attempts * self.RAPID_GUESSING_PENALTY
             else:
-                # Pattern: Quick re-run + meaningful code change
-                # Interpretation: Valid fast-paced debugging (micro-iteration)
+                # Pattern: Quick re-run + meaningful code change + no previous error
+                # Interpretation: Valid fast-paced iteration (testing variations)
                 iteration = IterationState.MICRO_ITERATION
         else:
             if metrics.is_semantic_change:

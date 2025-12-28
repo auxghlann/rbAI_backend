@@ -16,9 +16,12 @@ class SessionMetrics:
     
     # --- NEW FIELDS FOR DECISION TREES ---
     # These are required by the DataFusionEngine logic we just wrote
-    last_edit_size_chars: int        # Needed for Provenance (Figure 5)
-    last_run_interval_seconds: float # Needed for Iteration (Figure 6)
-    is_semantic_change: bool         # Needed for Iteration (Figure 6)
-    current_idle_duration: float     # Needed for Cognitive State (Figure 7)
-    is_window_focused: bool          # Needed for Cognitive State (Figure 7)
-    last_run_was_error: bool         # Needed for Cognitive State (Figure 7)
+    last_edit_size_chars: int        # Needed for Provenance 
+    last_run_interval_seconds: float # Needed for Iteration 
+    is_semantic_change: bool         # Needed for Iteration 
+    current_idle_duration: float     # Needed for Cognitive State 
+    is_window_focused: bool          # Needed for Cognitive State 
+    last_run_was_error: bool         # Needed for Cognitive State 
+    
+    # --- BURST TYPING DETECTION ---
+    recent_burst_size_chars: int = 0 # Keystrokes in recent 5-second window (for spam detection)
