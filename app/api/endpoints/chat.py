@@ -5,10 +5,12 @@ Provides Socratic tutoring integrated with behavioral telemetry.
 """
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, AsyncGenerator, List, Dict
 from datetime import datetime
 import logging
+import json
 
 from ...services.ai_orchestrator import PedagogicalFirewall
 from ...services.ai_orchestrator.firewall import ChatContext
@@ -23,6 +25,70 @@ except Exception as e:
     firewall = None
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
+
+
+# --- SESSION CODE STORAGE ---
+# In-memory storage for session code (replace with Redis/DB in production)
+_session_code_store: Dict[str, Dict[str, str]] = {}
+
+
+async def _store_session_code(session_id: str, problem_id: str, code: str) -> None:
+    """
+    Store the current code for a session-problem pair.
+    
+    Args:
+        session_id: Unique session identifier
+        problem_id: Problem/activity identifier
+        code: Current code content
+    """
+    key = f"{session_id}:{problem_id}"
+    _session_code_store[key] = {
+        "code": code,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+    logger.debug(f"Stored code for {key} ({len(code)} chars)")
+
+
+async def _get_session_code(session_id: str, problem_id: str) -> Optional[str]:
+    """
+    Retrieve the current code for a session-problem pair.
+    
+    Args:
+        session_id: Unique session identifier
+        problem_id: Problem/activity identifier
+        
+    Returns:
+        Current code or None if not found
+    """
+    key = f"{session_id}:{problem_id}"
+    stored = _session_code_store.get(key)
+    if stored:
+        return stored["code"]
+    return None
+
+
+# --- SIMPLE CHAT MODELS FOR FRONTEND ---
+
+class SimpleChatRequest(BaseModel):
+    """Simple chat request from frontend"""
+    message: str = Field(..., description="User message", min_length=1, max_length=500)
+    chat_history: Optional[List[Dict[str, str]]] = Field(
+        default=None,
+        description="Previous conversation messages for context (optional)"
+    )
+    session_id: Optional[str] = Field(
+        default=None,
+        description="Session ID to retrieve current code context"
+    )
+    problem_id: Optional[str] = Field(
+        default=None,
+        description="Problem ID to retrieve current code context"
+    )
+
+
+class SimpleChatResponse(BaseModel):
+    """Simple chat response to frontend"""
+    response: str = Field(..., description="AI response")
 
 
 # --- REQUEST/RESPONSE MODELS ---
@@ -70,6 +136,12 @@ class ChatRequest(BaseModel):
         description="Student's current code (optional, for debugging support)",
         max_length=1000,  # Keep token usage low
     )
+    
+    # Optional conversation history for context
+    chat_history: Optional[List[Dict[str, str]]] = Field(
+        None,
+        description="Previous conversation messages within this thread"
+    )
 
 
 class ChatResponse(BaseModel):
@@ -87,6 +159,121 @@ class ChatResponse(BaseModel):
 
 
 # --- ENDPOINTS ---
+
+@router.post("", response_model=SimpleChatResponse)
+async def simple_chat(request: SimpleChatRequest):
+    """
+    Simple chat endpoint for frontend - minimal interface.
+    
+    Provides helpful guidance and hints for coding problems.
+    """
+    if not firewall:
+        raise HTTPException(
+            status_code=503,
+            detail="AI tutoring service is unavailable. Check GROQ_API_KEY configuration."
+        )
+    
+    logger.info(f"Simple chat request - Message length: {len(request.message)}, History: {len(request.chat_history or [])} messages")
+    
+    # Fetch current code from session if available
+    current_code = None
+    if request.session_id and request.problem_id:
+        current_code = await _get_session_code(request.session_id, request.problem_id)
+        if current_code:
+            logger.info(f"Retrieved code context for session {request.session_id} ({len(current_code)} chars)")
+    
+    # Build basic context (assume general coding help)
+    context = ChatContext(
+        user_query=request.message,
+        problem_description="General coding problem",
+        problem_id=request.problem_id or "simple-chat",
+        chat_history=request.chat_history or [],
+        current_code=current_code,
+    )
+    
+    try:
+        # Process through firewall
+        response = await firewall.process_request(context)
+        
+        return SimpleChatResponse(
+            response=response.message
+        )
+        
+    except Exception as e:
+        logger.error(f"Error processing simple chat request: {e}")
+        return SimpleChatResponse(
+            response="Sorry, I encountered an error. Please try again."
+        )
+
+
+@router.post("/stream")
+async def stream_chat(request: SimpleChatRequest):
+    """
+    Streaming chat endpoint with Server-Sent Events (SSE).
+    
+    Streams AI responses in real-time for better UX, similar to ChatGPT.
+    Frontend receives chunks as they're generated.
+    
+    Response format:
+        data: {"content": "chunk text"}
+        data: {"content": "more text"}
+        data: [DONE]
+    """
+    if not firewall:
+        raise HTTPException(
+            status_code=503,
+            detail="AI tutoring service is unavailable. Check GROQ_API_KEY configuration."
+        )
+    
+    logger.info(f"Streaming chat request - Message length: {len(request.message)}, History: {len(request.chat_history or [])} messages")
+    
+    async def generate_response() -> AsyncGenerator[str, None]:
+        """Generate SSE-formatted response chunks"""
+        try:
+            # Fetch current code from session if available
+            current_code = None
+            if request.session_id and request.problem_id:
+                current_code = await _get_session_code(request.session_id, request.problem_id)
+                if current_code:
+                    logger.info(f"Retrieved code context for session {request.session_id} ({len(current_code)} chars)")
+            
+            # Build context with history
+            context = ChatContext(
+                user_query=request.message,
+                problem_description="General coding problem",
+                problem_id=request.problem_id or "simple-chat",
+                chat_history=request.chat_history or [],
+                current_code=current_code,
+            )
+            
+            # Stream through firewall
+            async for chunk in firewall.stream_response(context):
+                # Format as SSE
+                data = json.dumps({"content": chunk})
+                yield f"data: {data}\n\n"
+            
+            # Send completion signal
+            yield "data: [DONE]\n\n"
+            
+        except Exception as e:
+            logger.error(f"Error in streaming chat: {e}")
+            # Send error as final message
+            error_data = json.dumps({
+                "content": "\n\nSorry, I encountered an error. Please try again."
+            })
+            yield f"data: {error_data}\n\n"
+            yield "data: [DONE]\n\n"
+    
+    return StreamingResponse(
+        generate_response(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        }
+    )
+
 
 @router.post("/ask", response_model=ChatResponse)
 async def ask_tutor(request: ChatRequest):
@@ -110,7 +297,8 @@ async def ask_tutor(request: ChatRequest):
     
     logger.info(
         f"Chat request - Problem: {request.problem_id}, "
-        f"Query length: {len(request.user_query)}"
+        f"Query length: {len(request.user_query)}, "
+        f"History: {len(request.chat_history or [])} messages"
     )
     
     # Build context
@@ -118,6 +306,7 @@ async def ask_tutor(request: ChatRequest):
         user_query=request.user_query,
         problem_description=request.problem_description,
         problem_id=request.problem_id,
+        chat_history=request.chat_history or [],
     )
     
     # Add behavioral context if provided

@@ -1,7 +1,7 @@
 # app/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .api.endpoints import execution, telemetry, chat
+from .api.endpoints import execution, telemetry, chat, ai_generate
 
 app = FastAPI(title="rbAI Backend", version="1.0.0")
 
@@ -18,6 +18,7 @@ app.add_middleware(
 app.include_router(execution.router)
 app.include_router(telemetry.router)
 app.include_router(chat.router)
+app.include_router(ai_generate.router, prefix="/api/ai", tags=["AI Generation"])
 
 @app.get("/")
 async def root():

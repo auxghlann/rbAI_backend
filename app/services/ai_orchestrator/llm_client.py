@@ -32,13 +32,13 @@ class LLMClient:
         Initialize OpenAI client.
         
         Args:
-            api_key: OpenAI API key (defaults to OPENAI_API_KEY env var)
+            api_key: OpenAI API key (defaults to GROQ_API_KEY (for dev) env var)
             model: Model to use (default: gpt-4o-mini for cost efficiency)
         """
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.api_key = api_key or os.getenv("GROQ_API_KEY")
         if not self.api_key:
             raise ValueError(
-                "OpenAI API key required. Set OPENAI_API_KEY environment variable "
+                "OpenAI API key required. Set GROQ_API_KEY environment variable "
                 "or pass api_key parameter."
             )
         

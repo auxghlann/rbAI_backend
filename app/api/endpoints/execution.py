@@ -69,8 +69,9 @@ async def run_code(
     This endpoint:
     1. Executes user code securely in isolation
     2. Captures output and errors
-    3. Logs execution event for behavioral analysis
-    4. Returns results immediately to frontend
+    3. Stores code in session for chat context retrieval
+    4. Logs execution event for behavioral analysis
+    5. Returns results immediately to frontend
     
     Security Features:
     - 128MB memory limit
@@ -82,6 +83,15 @@ async def run_code(
     logger.info(f"Execution request for session {request.session_id}, problem {request.problem_id}")
     
     try:
+        # Store code in session for chat context (import here to avoid circular dependency)
+        from .chat import _store_session_code
+        background_tasks.add_task(
+            _store_session_code,
+            request.session_id,
+            request.problem_id,
+            request.code
+        )
+        
         # Execute code
         if request.test_cases:
             # Run with test validation

@@ -7,5 +7,6 @@ Integrates with behavioral engine for context-aware interventions.
 
 from .firewall import PedagogicalFirewall
 from .llm_client import LLMClient
+from .llm_client_groq import LLMClientGroq
 
-__all__ = ["PedagogicalFirewall", "LLMClient"]
+__all__ = ["PedagogicalFirewall", "LLMClient", "LLMClientGroq"]
