@@ -256,3 +256,97 @@ class LLMClientGroq:
         except Exception as e:
             logger.error(f"Unexpected error in Groq streaming: {e}")
             raise RuntimeError(f"Failed to stream response: {str(e)}")
+    
+    async def complete_with_function_calling(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        tools: List[Dict],
+        temperature: float = 0.7,
+        max_retries: int = 2,
+    ) -> Dict:
+        """
+        Generate completion with function/tool calling for structured outputs.
+        
+        Used for scenarios where you need the LLM to generate structured data
+        conforming to a schema (e.g., activity generation, data extraction).
+        
+        Args:
+            system_prompt: System instructions
+            user_prompt: User query
+            tools: List of tool/function definitions (OpenAI format)
+            temperature: Sampling temperature (0.7 for balanced creativity)
+            max_retries: Number of retry attempts on failure
+            
+        Returns:
+            Dictionary containing the function call name and parsed arguments
+            
+        Raises:
+            RuntimeError: If all retries fail or no function call generated
+        """
+        # Validate token budget
+        estimated_input_tokens = (len(system_prompt) + len(user_prompt)) // 4
+        if estimated_input_tokens > self.MAX_INPUT_TOKENS:
+            logger.warning(
+                f"Input may exceed token budget: ~{estimated_input_tokens} tokens "
+                f"(limit: {self.MAX_INPUT_TOKENS})"
+            )
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        for attempt in range(max_retries + 1):
+            try:
+                logger.debug(f"Requesting Groq function calling (attempt {attempt + 1}/{max_retries + 1})")
+                
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    tools=tools,
+                    tool_choice="required",  # Force function calling
+                    temperature=temperature,
+                    max_tokens=4000,  # Higher limit for structured generation
+                    timeout=15.0,
+                )
+                
+                message = response.choices[0].message
+                
+                if not message.tool_calls:
+                    raise RuntimeError("LLM did not generate function call")
+                
+                # Extract function call
+                function_call = message.tool_calls[0]
+                
+                # Log token usage
+                usage = response.usage
+                logger.info(
+                    f"Groq function calling successful - Tokens: {usage.prompt_tokens} in, "
+                    f"{usage.completion_tokens} out, {usage.total_tokens} total"
+                )
+                
+                return {
+                    "name": function_call.function.name,
+                    "arguments": function_call.function.arguments
+                }
+                
+            except RateLimitError as e:
+                logger.warning(f"Groq rate limit hit (attempt {attempt + 1}): {e}")
+                if attempt == max_retries:
+                    raise RuntimeError("Groq rate limit exceeded. Try again later.")
+                    
+            except APITimeoutError as e:
+                logger.warning(f"Groq timeout (attempt {attempt + 1}): {e}")
+                if attempt == max_retries:
+                    raise RuntimeError("Groq request timed out. Try again later.")
+                    
+            except APIError as e:
+                logger.error(f"Groq API error: {e}")
+                raise RuntimeError(f"AI service error: {str(e)}")
+                
+            except Exception as e:
+                logger.error(f"Unexpected error in Groq function calling: {e}")
+                raise RuntimeError(f"Failed to generate structured response: {str(e)}")
+        
+        raise RuntimeError("Failed to get Groq function call after all retries")

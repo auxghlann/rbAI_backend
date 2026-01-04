@@ -7,14 +7,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import json
-from groq import Groq
 import os
+from app.services.ai_orchestrator.llm_client_groq import LLMClientGroq
 
 router = APIRouter()
 
-# Initialize Groq client (you can also use OpenAI, Anthropic, etc.)
-# Make sure to set GROQ_API_KEY in your environment
-client = Groq(api_key=os.getenv("GROQ_API_KEY", ""))
+# Initialize modular LLM client
+# Uses llama-3.3-70b-versatile for balanced performance in activity generation
+client = LLMClientGroq(model="llama-3.3-70b-versatile")
 
 
 # Request/Response Models
@@ -129,31 +129,16 @@ When creating activities:
 
 Generate activities appropriate for the requested difficulty level and topic."""
 
-        # Call LLM with function calling
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",  # or "mixtral-8x7b-32768"
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": request.prompt}
-            ],
+        # Call LLM with function calling using modular client
+        function_call_result = await client.complete_with_function_calling(
+            system_prompt=system_prompt,
+            user_prompt=request.prompt,
             tools=[ACTIVITY_GENERATION_TOOL],
-            tool_choice="required",  # Force the model to use the function
-            temperature=0.7,
-            max_tokens=4000
+            temperature=0.7
         )
 
-        # Extract function call result
-        message = response.choices[0].message
-        
-        if not message.tool_calls:
-            raise HTTPException(
-                status_code=500,
-                detail="LLM did not generate activity using function calling"
-            )
-
         # Parse the function call arguments
-        function_call = message.tool_calls[0]
-        generated_data = json.loads(function_call.function.arguments)
+        generated_data = json.loads(function_call_result["arguments"])
 
         # Validate and return
         activity = GeneratedActivity(**generated_data)
@@ -171,36 +156,7 @@ Generate activities appropriate for the requested difficulty level and topic."""
         )
 
 
-@router.post("/generate-activity-openai", response_model=GeneratedActivity)
-async def generate_activity_openai(request: GenerateActivityRequest):
-    """
-    Alternative implementation using OpenAI (if you prefer)
-    """
-    try:
-        from openai import OpenAI
-        
-        openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        
-        system_prompt = """You are an expert computer science educator creating Python programming exercises."""
-        
-        response = openai_client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": request.prompt}
-            ],
-            tools=[ACTIVITY_GENERATION_TOOL],
-            tool_choice={"type": "function", "function": {"name": "generate_coding_activity"}},
-            temperature=0.7
-        )
-        
-        function_call = response.choices[0].message.tool_calls[0]
-        generated_data = json.loads(function_call.function.arguments)
-        
-        return GeneratedActivity(**generated_data)
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"OpenAI generation failed: {str(e)}"
-        )
+# Note: To use a different model (e.g., for different capabilities or costs),
+# you can create another client instance:
+# client_fast = LLMClientGroq(model="llama-3.1-8b-instant")  # Faster, simpler tasks
+# client_large = LLMClientGroq(model="mixtral-8x7b-32768")   # Larger context window
