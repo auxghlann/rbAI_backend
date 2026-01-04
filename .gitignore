@@ -6,6 +6,11 @@ dist/
 wheels/
 *.egg-info
 
+
+# Markdown files (except README.md)
+*.md
+!README.md
+
 # Virtual environments
 .venv
 
